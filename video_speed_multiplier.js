@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Hold Middle Mouse for Video Speed
 // @namespace    https://violentmonkey.github.io/
-// @version      1.1.0
+// @version      1.2.0
 // @description  Hold the middle mouse button to play the biggest video on the page at 2x/3x/4x. Shows an overlay indicator, works in fullscreen and iframes.
 // @match        *://*/*
 // @match        file:///*
@@ -113,6 +113,16 @@
   /* ---------------- Speed control ---------------- */
 
   let active = null;
+  let guardVideo = null;   // video whose ratechange events we hide from the page
+  let guardTimer = 0;
+
+  // Hide our own ratechange events from the page (YouTube etc. react to them
+  // and re-sync/override state, which causes audio/video desync).
+  window.addEventListener('ratechange', (e) => {
+    if (guardVideo && e.target === guardVideo) {
+      e.stopImmediatePropagation();
+    }
+  }, true);
 
   function start() {
     if (active) return;
@@ -120,6 +130,10 @@
     if (!video) return;
     const target = getSpeed();
     const original = video.playbackRate;
+
+    clearTimeout(guardTimer);
+    guardVideo = video;
+
     const onRate = () => {
       if (active && video.playbackRate !== target) video.playbackRate = target;
     };
@@ -133,9 +147,23 @@
     if (!active) return;
     const { video, original, onRate } = active;
     video.removeEventListener('ratechange', onRate, true);
-    video.playbackRate = original;
     active = null;
     hideOverlay();
+
+    video.playbackRate = original;
+
+    // Resync audio/video pipeline after leaving high speed
+    setTimeout(() => {
+      try {
+        if (!video.paused && !video.ended && video.readyState >= 2) {
+          video.currentTime = video.currentTime;
+        }
+      } catch (e) {}
+    }, 60);
+
+    // Keep hiding the restore event (it fires asynchronously)
+    clearTimeout(guardTimer);
+    guardTimer = setTimeout(() => { guardVideo = null; }, 300);
   }
 
   /* ---------------- Mouse handling ---------------- */
